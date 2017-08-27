@@ -1,3 +1,4 @@
+#include "cuda_helper.h"
 
 __device__ __forceinline__ void G256_Mul2(uint32_t *regs)
 {
@@ -239,6 +240,15 @@ __device__ __forceinline__ void G256_ShiftBytesQ_quad(uint32_t &x7, uint32_t &x6
     t1 = __byte_perm(x7, 0, 0x3232)>>shift2;
     x7 = __byte_perm(t0, t1, 0x5410);
 }
+
+#if __CUDA_ARCH__ < 300
+/**
+ * __shfl() returns the value of var held by the thread whose ID is given by srcLane.
+ * If srcLane is outside the range 0..width-1, the thread’s own value of var is returned.
+ */
+#undef __shfl
+#define __shfl(var, srcLane, width) (uint32_t)(var)
+#endif
 
 __device__ __forceinline__ void G256_MixFunction_quad(uint32_t *r)
 {

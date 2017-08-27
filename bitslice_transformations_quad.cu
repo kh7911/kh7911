@@ -1,12 +1,24 @@
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 300
+/**
+ * __shfl() returns the value of var held by the thread whose ID is given by srcLane.
+ * If srcLane is outside the range 0..width-1, the thread's own value of var is returned.
+ */
+#undef __shfl
+#define __shfl(var, srcLane, width) (uint32_t)(var)
+#endif
 
-__device__ __forceinline__ void to_bitslice_quad(uint32_t *input, uint32_t *output)
+#ifdef __CUDA_ARCH__
+
+__device__ __forceinline__
+void to_bitslice_quad(uint32_t *input, uint32_t *output)
 {
-    int n = threadIdx.x % 4;
     uint32_t other[8];
-#pragma unroll 8
+    const int n = threadIdx.x % 4;
+
+    #pragma unroll
     for (int i = 0; i < 8; i++) {
-        input[i] =__shfl((int)input[i], n ^ (3*(n >=1 && n <=2)), 4);
-        other[i] =__shfl((int)input[i], (threadIdx.x + 1) % 4, 4);
+        input[i] = __shfl((int)input[i], n ^ (3*(n >=1 && n <=2)), 4);
+        other[i] = __shfl((int)input[i], (threadIdx.x + 1) % 4, 4);
         input[i] = __shfl((int)input[i], threadIdx.x & 2, 4);
         other[i] = __shfl((int)other[i], threadIdx.x & 2, 4);
         if (threadIdx.x & 1) {
@@ -48,6 +60,7 @@ __device__ __forceinline__ void to_bitslice_quad(uint32_t *input, uint32_t *outp
     output[ 0] |= ((other[ 6] & 0x00000100) <<21);
     output[ 0] |= ((input[ 7] & 0x00000100) <<22);
     output[ 0] |= ((other[ 7] & 0x00000100) <<23);
+
     output[ 1] |= ((input[ 0] & 0x00000002) >> 1);
     output[ 1] |=  (other[ 0] & 0x00000002);
     output[ 1] |= ((input[ 1] & 0x00000002) << 1);
@@ -80,6 +93,7 @@ __device__ __forceinline__ void to_bitslice_quad(uint32_t *input, uint32_t *outp
     output[ 1] |= ((other[ 6] & 0x00000200) <<20);
     output[ 1] |= ((input[ 7] & 0x00000200) <<21);
     output[ 1] |= ((other[ 7] & 0x00000200) <<22);
+
     output[ 2] |= ((input[ 0] & 0x00000004) >> 2);
     output[ 2] |= ((other[ 0] & 0x00000004) >> 1);
     output[ 2] |=  (input[ 1] & 0x00000004);
@@ -274,7 +288,8 @@ __device__ __forceinline__ void to_bitslice_quad(uint32_t *input, uint32_t *outp
     output[ 7] |= ((other[ 7] & 0x00008000) <<16);
 }
 
-__device__ __forceinline__ void from_bitslice_quad(uint32_t *input, uint32_t *output)
+__device__ __forceinline__
+void from_bitslice_quad(uint32_t *input, uint32_t *output)
 {
 #pragma unroll 8
     for (int i=0; i < 16; i+=2) output[i] = 0;
@@ -413,6 +428,14 @@ __device__ __forceinline__ void from_bitslice_quad(uint32_t *input, uint32_t *ou
         if (threadIdx.x & 1) output[i] = __byte_perm(output[i], 0, 0x1032);
         output[i] = __byte_perm(output[i], __shfl((int)output[i], (threadIdx.x+1)%4, 4), 0x7610);
         output[i+1] = __shfl((int)output[i], (threadIdx.x+2)%4, 4);
-        if ((threadIdx.x % 4) != 0) output[i] = output[i+1] = 0;
+        if (threadIdx.x % 4) output[i] = output[i+1] = 0;
     }
 }
+
+#else
+
+/* host "fake" functions */
+#define from_bitslice_quad(st, out)
+#define to_bitslice_quad(in, msg) in[0] = (uint32_t) in[0];
+
+#endif /* device only code */

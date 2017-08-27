@@ -22,7 +22,8 @@
 #include <jansson.h>
 #include <curl/curl.h>
 #include <time.h>
-#if defined(WIN32)
+#ifdef WIN32
+#include "compat/winansi.h"
 #include <winsock2.h>
 #include <mstcpip.h>
 #else
@@ -77,7 +78,14 @@ void applog(int prio, const char *fmt, ...)
 		va_list ap2;
 		char *buf;
 		int len;
-		
+
+		/* custom colors to syslog prio */
+		if (prio > LOG_DEBUG) {
+			switch (prio) {
+				case LOG_BLUE: prio = LOG_NOTICE; break;
+			}
+		}
+
 		va_copy(ap2, ap);
 		len = vsnprintf(NULL, 0, fmt, ap2) + 1;
 		va_end(ap2);
@@ -89,6 +97,7 @@ void applog(int prio, const char *fmt, ...)
 	if (0) {}
 #endif
 	else {
+		const char* color = "";
 		char *f;
 		int len;
 		time_t now;
@@ -101,16 +110,34 @@ void applog(int prio, const char *fmt, ...)
 		memcpy(&tm, tm_p, sizeof(tm));
 		pthread_mutex_unlock(&applog_lock);
 
-		len = (int)(40 + strlen(fmt) + 2);
-		f = (char*)alloca(len);
-		sprintf(f, "[%d-%02d-%02d %02d:%02d:%02d] %s\n",
+		switch (prio) {
+			case LOG_ERR:     color = CL_RED; break;
+			case LOG_WARNING: color = CL_YLW; break;
+			case LOG_NOTICE:  color = CL_WHT; break;
+			case LOG_INFO:    color = ""; break;
+			case LOG_DEBUG:   color = CL_GRY; break;
+
+			case LOG_BLUE:
+				prio = LOG_NOTICE;
+				color = CL_CYN;
+				break;
+		}
+		if (!use_colors)
+			color = "";
+
+		len = 40 + (int) strlen(fmt) + 2;
+		f = (char*) alloca(len);
+		sprintf(f, "[%d-%02d-%02d %02d:%02d:%02d]%s %s%s\n",
 			tm.tm_year + 1900,
 			tm.tm_mon + 1,
 			tm.tm_mday,
 			tm.tm_hour,
 			tm.tm_min,
 			tm.tm_sec,
-			fmt);
+			color,
+			fmt,
+			use_colors ? CL_N : ""
+		);
 		pthread_mutex_lock(&applog_lock);
 		vfprintf(stderr, f, ap);	/* atomic write to stderr */
 		fflush(stderr);
@@ -230,12 +257,13 @@ static size_t resp_hdr_cb(void *ptr, size_t size, size_t nmemb, void *user_data)
 		goto out;
 
 	if (!strcasecmp("X-Long-Polling", key)) {
-		hi->lp_path = val;	/* steal memory reference */
+		hi->lp_path = val;	/* X-Mining-Extensions: longpoll */
 		val = NULL;
 	}
 
 	if (!strcasecmp("X-Reject-Reason", key)) {
-		hi->reason = val;	/* steal memory reference */
+		hi->reason = val;	/* X-Mining-Extensions: reject-reason */
+		//applog(LOG_WARNING, "%s:%s", key, val);
 		val = NULL;
 	}
 
@@ -244,6 +272,9 @@ static size_t resp_hdr_cb(void *ptr, size_t size, size_t nmemb, void *user_data)
 		val = NULL;
 	}
 
+	if (!strcasecmp("X-Nonce-Range", key)) {
+		/* todo when available: X-Mining-Extensions: noncerange */
+	}
 out:
 	free(key);
 	free(val);
@@ -306,7 +337,7 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 	struct upload_buffer upload_data;
 	json_error_t err;
 	struct curl_slist *headers = NULL;
-	char len_hdr[64];
+	char len_hdr[64], hashrate_hdr[64];
 	char curl_err_str[CURL_ERROR_SIZE];
 	long timeout = longpoll ? opt_timeout : 30;
 	struct header_info hi = {0};
@@ -356,13 +387,14 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 	upload_data.buf = rpc_req;
 	upload_data.len = strlen(rpc_req);
 	upload_data.pos = 0;
-	sprintf(len_hdr, "Content-Length: %lu",
-		(unsigned long) upload_data.len);
+	sprintf(len_hdr, "Content-Length: %lu", (unsigned long) upload_data.len);
+	sprintf(hashrate_hdr, "X-Mining-Hashrate: %llu", (unsigned long long) global_hashrate);
 
 	headers = curl_slist_append(headers, "Content-Type: application/json");
 	headers = curl_slist_append(headers, len_hdr);
 	headers = curl_slist_append(headers, "User-Agent: " USER_AGENT);
-	headers = curl_slist_append(headers, "X-Mining-Extensions: midstate");
+	headers = curl_slist_append(headers, "X-Mining-Extensions: longpoll noncerange reject-reason");
+	headers = curl_slist_append(headers, hashrate_hdr);
 	headers = curl_slist_append(headers, "Accept:"); /* disable Accept hdr*/
 	headers = curl_slist_append(headers, "Expect:"); /* disable Expect hdr*/
 
@@ -406,7 +438,7 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 
 	if (opt_protocol) {
 		char *s = json_dumps(val, JSON_INDENT(3));
-		applog(LOG_DEBUG, "JSON protocol response:\n%s", s);
+		applog(LOG_DEBUG, "JSON protocol response:\n%s\n", s);
 		free(s);
 	}
 
@@ -449,15 +481,22 @@ err_out:
 	return NULL;
 }
 
-char *bin2hex(const unsigned char *p, size_t len)
+void cbin2hex(char *out, const char *in, size_t len)
 {
-	unsigned int i;
+	if (out) {
+		unsigned int i;
+		for (i = 0; i < len; i++)
+			sprintf(out + (i * 2), "%02x", (uint8_t)in[i]);
+	}
+}
+
+char *bin2hex(const unsigned char *in, size_t len)
+{
 	char *s = (char*)malloc((len * 2) + 1);
 	if (!s)
 		return NULL;
 
-	for (i = 0; i < len; i++)
-		sprintf(s + (i * 2), "%02x", (unsigned int) p[i]);
+	cbin2hex(s, (const char *) in, len);
 
 	return s;
 }
@@ -530,9 +569,12 @@ bool fulltest(const uint32_t *hash, const uint32_t *target)
 			rc = true;
 			break;
 		}
+		if (hash[1] == target[1]) {
+			applog(LOG_NOTICE, "We found a close match!");
+		}
 	}
 
-	if (opt_debug) {
+	if (!rc && opt_debug) {
 		uint32_t hash_be[8], target_be[8];
 		char *hash_str, *target_str;
 		
@@ -545,7 +587,7 @@ bool fulltest(const uint32_t *hash, const uint32_t *target)
 
 		applog(LOG_DEBUG, "DEBUG: %s\nHash:   %s\nTarget: %s",
 			rc ? "hash <= target"
-			   : "hash > target (false positive)",
+			   : CL_YLW "hash > target (false positive)" CL_N,
 			hash_str,
 			target_str);
 
@@ -982,14 +1024,45 @@ out:
 	return ret;
 }
 
+/**
+ * Extract bloc height     L H... here len=3, height=0x1333e8
+ * "...0000000000ffffffff2703e83313062f503253482f043d61105408"
+ */
+static uint32_t getblocheight(struct stratum_ctx *sctx)
+{
+	uint32_t height = 0;
+	uint8_t hlen = 0, *p, *m;
+
+	// find 0xffff tag
+	p = (uint8_t*) sctx->job.coinbase + 32;
+	m = p + 128;
+	while (*p != 0xff && p < m) p++;
+	while (*p == 0xff && p < m) p++;
+	if (*(p-1) == 0xff && *(p-2) == 0xff) {
+		p++; hlen = *p;
+		p++; height = le16dec(p);
+		p += 2;
+		switch (hlen) {
+			case 4:
+				height += 0x10000UL * le16dec(p);
+				break;
+			case 3:
+				height += 0x10000UL * (*p);
+				break;
+		}
+	}
+	return height;
+}
+
 static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 {
-	const char *job_id, *prevhash, *coinb1, *coinb2, *version, *nbits, *ntime, *nreward;
+	const char *job_id, *prevhash, *coinb1, *coinb2, *version, *nbits, *stime, *nreward;
 	size_t coinb1_size, coinb2_size;
 	bool clean, ret = false;
 	int merkle_count, i;
 	json_t *merkle_arr;
 	unsigned char **merkle;
+	int ntime;
 
 	job_id = json_string_value(json_array_get(params, 0));
 	prevhash = json_string_value(json_array_get(params, 1));
@@ -1001,16 +1074,26 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	merkle_count = json_array_size(merkle_arr);
 	version = json_string_value(json_array_get(params, 5));
 	nbits = json_string_value(json_array_get(params, 6));
-	ntime = json_string_value(json_array_get(params, 7));
+	stime = json_string_value(json_array_get(params, 7));
 	clean = json_is_true(json_array_get(params, 8));
 	nreward = json_string_value(json_array_get(params, 9));
 
-	if (!job_id || !prevhash || !coinb1 || !coinb2 || !version || !nbits || !ntime ||
+	if (!job_id || !prevhash || !coinb1 || !coinb2 || !version || !nbits || !stime ||
 	    strlen(prevhash) != 64 || strlen(version) != 8 ||
-	    strlen(nbits) != 8 || strlen(ntime) != 8) {
+	    strlen(nbits) != 8 || strlen(stime) != 8) {
 		applog(LOG_ERR, "Stratum notify: invalid parameters");
 		goto out;
 	}
+
+	/* store stratum server time diff */
+	hex2bin((unsigned char *)&ntime, stime, 4);
+	ntime = swab32(ntime) - (uint32_t) time(0);
+	if (ntime > sctx->srvtime_diff) {
+		sctx->srvtime_diff = ntime;
+		if (!opt_quiet)
+			applog(LOG_DEBUG, "stratum time is at least %ds in the future", ntime);
+	}
+
 	merkle = (unsigned char**)malloc(merkle_count * sizeof(char *));
 	for (i = 0; i < merkle_count; i++) {
 		const char *s = json_string_value(json_array_get(merkle_arr, i));
@@ -1031,10 +1114,12 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	coinb2_size = strlen(coinb2) / 2;
 	sctx->job.coinbase_size = coinb1_size + sctx->xnonce1_size +
 	                          sctx->xnonce2_size + coinb2_size;
+
 	sctx->job.coinbase = (unsigned char*)realloc(sctx->job.coinbase, sctx->job.coinbase_size);
 	sctx->job.xnonce2 = sctx->job.coinbase + coinb1_size + sctx->xnonce1_size;
 	hex2bin(sctx->job.coinbase, coinb1, coinb1_size);
 	memcpy(sctx->job.coinbase + coinb1_size, sctx->xnonce1, sctx->xnonce1_size);
+
 	if (!sctx->job.job_id || strcmp(sctx->job.job_id, job_id))
 		memset(sctx->job.xnonce2, 0, sctx->xnonce2_size);
 	hex2bin(sctx->job.xnonce2 + sctx->xnonce2_size, coinb2, coinb2_size);
@@ -1042,6 +1127,8 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	free(sctx->job.job_id);
 	sctx->job.job_id = strdup(job_id);
 	hex2bin(sctx->job.prevhash, prevhash, 32);
+
+	sctx->bloc_height = getblocheight(sctx);
 
 	for (i = 0; i < sctx->job.merkle_count; i++)
 		free(sctx->job.merkle[i]);
@@ -1051,7 +1138,7 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 
 	hex2bin(sctx->job.version, version, 4);
 	hex2bin(sctx->job.nbits, nbits, 4);
-	hex2bin(sctx->job.ntime, ntime, 4);
+	hex2bin(sctx->job.ntime, stime, 4);
 	if(nreward != NULL)
 	{
 		if(strlen(nreward) == 4)
@@ -1081,8 +1168,7 @@ static bool stratum_set_difficulty(struct stratum_ctx *sctx, json_t *params)
 	sctx->next_diff = diff;
 	pthread_mutex_unlock(&sctx->work_lock);
 
-	if (opt_debug)
-		applog(LOG_DEBUG, "Stratum difficulty set to %g", diff);
+	applog(LOG_WARNING, "Stratum difficulty set to %g", diff);
 
 	return true;
 }
@@ -1317,4 +1403,164 @@ pop:
 out:
 	pthread_mutex_unlock(&tq->mutex);
 	return rval;
+}
+
+/**
+ * @param buf char[9] mini
+ * @param time_t timer to convert
+ */
+size_t time2str(char* buf, time_t timer)
+{
+	struct tm* tm_info;
+	tm_info = localtime(&timer);
+	return strftime(buf, 19, "%H:%M:%S", tm_info);
+}
+
+/**
+ * Alloc and returns time string (to be freed)
+ * @param time_t timer to convert
+ */
+char* atime2str(time_t timer)
+{
+	char* buf = (char*) malloc(16);
+	memset(buf, 0, 16);
+	time2str(buf, timer);
+	return buf;
+}
+
+/* sprintf can be used in applog */
+static char* format_hash(char* buf, unsigned char *hash)
+{
+	int len = 0;
+	for (int i=0; i < 32; i += 4) {
+		len += sprintf(buf+len, "%02x%02x%02x%02x ",
+			hash[i], hash[i+1], hash[i+2], hash[i+3]);
+	}
+	return buf;
+}
+
+/* to debug diff in data */
+extern void applog_compare_hash(unsigned char *hash, unsigned char *hash2)
+{
+	char s[256] = "";
+	int len = 0;
+	for (int i=0; i < 32; i += 4) {
+		char *color = memcmp(hash+i, hash2+i, 4) ? CL_WHT : CL_GRY;
+		len += sprintf(s+len, "%s%02x%02x%02x%02x " CL_GRY, color,
+			hash[i], hash[i+1], hash[i+2], hash[i+3]);
+		s[len] = '\0';
+	}
+	applog(LOG_DEBUG, "%s", s);
+}
+
+extern void applog_hash(unsigned char *hash)
+{
+	char s[128] = {'\0'};
+	applog(LOG_DEBUG, "%s", format_hash(s, hash));
+}
+
+#define printpfx(n,h) \
+	printf("%s%12s%s: %s\n", CL_BLU, n, CL_N, format_hash(s, h))
+
+void print_hash_tests(void)
+{
+	char s[128] = {'\0'};
+	unsigned char buf[128], hash[128];
+	memset(buf, 0, sizeof buf);
+
+	printf(CL_WHT "CPU HASH ON EMPTY BUFFER RESULTS:" CL_N "\n");
+
+	memset(hash, 0, sizeof hash);
+	animehash(&hash[0], &buf[0]);
+	printpfx("anime", hash);
+
+	memset(hash, 0, sizeof hash);
+	blake256hash(&hash[0], &buf[0], 8);
+	printpfx("blakecoin", hash);
+
+	memset(hash, 0, sizeof hash);
+	blake256hash(&hash[0], &buf[0], 14);
+	printpfx("blake", hash);
+
+	memset(hash, 0, sizeof hash);
+	deephash(&hash[0], &buf[0]);
+	printpfx("deep", hash);
+
+	memset(hash, 0, sizeof hash);
+	fresh_hash(&hash[0], &buf[0]);
+	printpfx("fresh", hash);
+
+	memset(hash, 0, sizeof hash);
+	fugue256_hash(&hash[0], &buf[0], 32);
+	printpfx("fugue256", hash);
+
+	memset(hash, 0, sizeof hash);
+	groestlhash(&hash[0], &buf[0]);
+	printpfx("groestl", hash);
+
+	memset(hash, 0, sizeof hash);
+	heavycoin_hash(&hash[0], &buf[0], 32);
+	printpfx("heavy", hash);
+
+	memset(hash, 0, sizeof hash);
+	keccak256_hash(&hash[0], &buf[0]);
+	printpfx("keccak", hash);
+
+	memset(hash, 0, sizeof hash);
+	jackpothash(&hash[0], &buf[0]);
+	printpfx("jackpot", hash);
+
+	memset(hash, 0, sizeof hash);
+	doomhash(&hash[0], &buf[0]);
+	printpfx("luffa", hash);
+
+	memset(hash, 0, sizeof hash);
+	myriadhash(&hash[0], &buf[0]);
+	printpfx("myriad", hash);
+
+	memset(hash, 0, sizeof hash);
+	nist5hash(&hash[0], &buf[0]);
+	printpfx("nist5", hash);
+
+	memset(hash, 0, sizeof hash);
+	pentablakehash(&hash[0], &buf[0]);
+	printpfx("pentablake", hash);
+
+	memset(hash, 0, sizeof hash);
+	quarkhash(&hash[0], &buf[0]);
+	printpfx("quark", hash);
+
+	memset(hash, 0, sizeof hash);
+	qubithash(&hash[0], &buf[0]);
+	printpfx("qubit", hash);
+
+	memset(hash, 0, sizeof hash);
+	skein_hash(&hash[0], &buf[0]);
+	printpfx("skein", hash);
+
+	memset(hash, 0, sizeof hash);
+	wcoinhash(&hash[0], &buf[0]);
+	printpfx("whirl", hash);
+
+	memset(hash, 0, sizeof hash);
+	x11hash(&hash[0], &buf[0]);
+	printpfx("X11", hash);
+
+	memset(hash, 0, sizeof hash);
+	x13hash(&hash[0], &buf[0]);
+	printpfx("X13", hash);
+
+	memset(hash, 0, sizeof hash);
+	x14hash(&hash[0], &buf[0]);
+	printpfx("X14", hash);
+
+	memset(hash, 0, sizeof hash);
+	x15hash(&hash[0], &buf[0]);
+	printpfx("X15", hash);
+
+	memset(hash, 0, sizeof hash);
+	x17hash(&hash[0], &buf[0]);
+	printpfx("X17", hash);
+
+	printf("\n");
 }

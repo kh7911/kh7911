@@ -1,46 +1,39 @@
-#include <cuda.h>
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-
 #include <stdio.h>
+#include <stdint.h>
 #include <memory.h>
 
-// Folgende Definitionen später durch header ersetzen
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-
-#define SPH_C64(x)    ((uint64_t)(x ## ULL))
+#include "cuda_helper.h"
 
 // aus cpu-miner.c
-extern "C" extern int device_map[8];
-// aus heavy.cu
-extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
+extern int device_map[8];
 
 // Take a look at: https://www.schneier.com/skein1.3.pdf
 
-#if __CUDA_ARCH__ >= 350
-__forceinline__ __device__ uint64_t ROTL64(const uint64_t value, const int offset) {
-    uint2 result;
-    if(offset >= 32) {
-        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.x) : "r"(__double2loint(__longlong_as_double(value))), "r"(__double2hiint(__longlong_as_double(value))), "r"(offset));
-        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.y) : "r"(__double2hiint(__longlong_as_double(value))), "r"(__double2loint(__longlong_as_double(value))), "r"(offset));
-    } else {
-        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.x) : "r"(__double2hiint(__longlong_as_double(value))), "r"(__double2loint(__longlong_as_double(value))), "r"(offset));
-        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.y) : "r"(__double2loint(__longlong_as_double(value))), "r"(__double2hiint(__longlong_as_double(value))), "r"(offset));
-    }
-    return  __double_as_longlong(__hiloint2double(result.y, result.x));
-}
-#else
-#define ROTL64(x, n)        (((x) << (n)) | ((x) >> (64 - (n))))
-#endif
 #define SHL(x, n)			((x) << (n))
 #define SHR(x, n)			((x) >> (n))
 
-// Zum testen Hostcode...
-/*	Hier erstmal die Tabelle mit den Konstanten für die Mix-Funktion. Kann später vll.
-	mal direkt in den Code eingesetzt werden
-*/
+#if __CUDA_ARCH__ >= 320
+__device__
+uint64_t skein_rotl64(const uint64_t x, const int offset)
+{
+	uint64_t res;
+	asm("{\n\t"
+		".reg .u32 tl,th,vl,vh;\n\t"
+		".reg .pred p;\n\t"
+		"mov.b64 {tl,th}, %1;\n\t"
+		"shf.l.wrap.b32 vl, tl, th, %2;\n\t"
+		"shf.l.wrap.b32 vh, th, tl, %2;\n\t"
+		"setp.lt.u32 p, %2, 32;\n\t"
+		"@!p mov.b64 %0, {vl,vh};\n\t"
+		"@p  mov.b64 %0, {vh,vl};\n\t"
+	"}"
+		: "=l"(res) : "l"(x) , "r"(offset)
+	);
+	return res;
+}
+#undef ROTL64
+#define ROTL64 skein_rotl64
+#endif
 
 /*
  * M9_ ## s ## _ ## i  evaluates to s+i mod 9 (0 <= s <= 18, 0 <= i <= 7).
@@ -311,18 +304,8 @@ __forceinline__ __device__ uint64_t ROTL64(const uint64_t value, const int offse
 		TFBIG_MIX8(p[6], p[1], p[0], p[7], p[2], p[5], p[4], p[3],  8, 35, 56, 22); \
 	}
 
-static __constant__ uint64_t d_constMem[8];
-static uint64_t h_constMem[8] = {
-	SPH_C64(0x4903ADFF749C51CE),
-	SPH_C64(0x0D95DE399746DF03),
-	SPH_C64(0x8FD1934127C79BCE),
-	SPH_C64(0x9A255629FF352CB1),
-	SPH_C64(0x5DB62599DF6CA7B0),
-	SPH_C64(0xEABE394CA9D5C3F4),
-	SPH_C64(0x991112C71A75B523),
-	SPH_C64(0xAE18A40B660FCC33) };
-
-__global__ void quark_skein512_gpu_hash_64(int threads, uint32_t startNounce, uint64_t *g_hash, uint32_t *g_nonceVector)
+__global__
+void quark_skein512_gpu_hash_64(int threads, uint32_t startNounce, uint64_t * const __restrict__ g_hash, uint32_t *g_nonceVector)
 {
 	int thread = (blockDim.x * blockIdx.x + threadIdx.x);
 	if (thread < threads)
@@ -338,14 +321,14 @@ __global__ void quark_skein512_gpu_hash_64(int threads, uint32_t startNounce, ui
 		uint64_t *inpHash = &g_hash[8 * hashPosition];
 
 		// Initialisierung
-		h0 = d_constMem[0];
-		h1 = d_constMem[1];
-		h2 = d_constMem[2];
-		h3 = d_constMem[3];
-		h4 = d_constMem[4];
-		h5 = d_constMem[5];
-		h6 = d_constMem[6];
-		h7 = d_constMem[7];
+		h0 = 0x4903ADFF749C51CEull;
+		h1 = 0x0D95DE399746DF03ull;
+		h2 = 0x8FD1934127C79BCEull;
+		h3 = 0x9A255629FF352CB1ull;
+		h4 = 0x5DB62599DF6CA7B0ull;
+		h5 = 0xEABE394CA9D5C3F4ull;
+		h6 = 0x991112C71A75B523ull;
+		h7 = 0xAE18A40B660FCC33ull;
 
 		// 1. Runde -> etype = 480, ptr = 64, bcount = 0, data = msg		
 #pragma unroll 8
@@ -422,16 +405,13 @@ __global__ void quark_skein512_gpu_hash_64(int threads, uint32_t startNounce, ui
 }
 
 // Setup-Funktionen
-__host__ void quark_skein512_cpu_init(int thr_id, int threads)
+__host__
+void quark_skein512_cpu_init(int thr_id, int threads)
 {
-	// nix zu tun ;-)
-	cudaMemcpyToSymbol( d_constMem,
-                        h_constMem,
-                        sizeof(h_constMem),
-                        0, cudaMemcpyHostToDevice);
 }
 
-__host__ void quark_skein512_cpu_hash_64(int thr_id, int threads, uint32_t startNounce, uint32_t *d_nonceVector, uint32_t *d_hash, int order)
+__host__
+void quark_skein512_cpu_hash_64(int thr_id, int threads, uint32_t startNounce, uint32_t *d_nonceVector, uint32_t *d_hash, int order)
 {
 	const int threadsperblock = 256;
 

@@ -1,9 +1,10 @@
+#include <stdio.h>
+#include <memory.h>
 #include <string.h>
-#include <openssl/sha.h>
-#include <cuda.h>
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+
 #include <map>
+
+#include <openssl/sha.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -28,6 +29,8 @@
 #include "heavy/cuda_groestl512.h"
 #include "heavy/cuda_blake512.h"
 #include "heavy/cuda_combine.h"
+
+#include "cuda_helper.h"
 
 extern uint32_t *d_hash2output[8];
 extern uint32_t *d_hash3output[8];
@@ -188,10 +191,16 @@ extern "C" void cuda_devicenames()
     }
 }
 
+// Can't be called directly in cpu-miner
+extern "C" void cuda_devicereset()
+{
+    cudaDeviceReset();
+}
+
 static bool substringsearch(const char *haystack, const char *needle, int &match)
 {
-    int hlen = strlen(haystack);
-    int nlen = strlen(needle);
+    int hlen = (int) strlen(haystack);
+    int nlen = (int) strlen(needle);
     for (int i=0; i < hlen; ++i)
     {
         if (haystack[i] == ' ') continue;
@@ -337,7 +346,7 @@ int scanhash_heavy_cpp(int thr_id, uint32_t *pdata,
     blake512_cpu_setBlock(pdata, blocklen);
 
     do {
-        int i;
+        uint32_t i;
 
         ////// Compaction init
         thrust::device_ptr<uint32_t> devNoncePtr(d_nonceVector[thr_id]);
@@ -392,7 +401,7 @@ int scanhash_heavy_cpp(int thr_id, uint32_t *pdata,
         if(actualNumberOfValuesInNonceVectorGPU > 0)
         {
             cudaMemcpy(cpu_nonceVector, d_nonceVector[thr_id], sizeof(uint32_t) * actualNumberOfValuesInNonceVectorGPU, cudaMemcpyDeviceToHost);
-        
+
             for (i=0; i<actualNumberOfValuesInNonceVectorGPU;++i)
             {
                 uint32_t nonce = cpu_nonceVector[i];

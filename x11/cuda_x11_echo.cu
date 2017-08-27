@@ -1,35 +1,7 @@
-#include <cuda.h>
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-
 #include <stdio.h>
 #include <memory.h>
 
-// Folgende Definitionen sp‰ter durch header ersetzen
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-
-// das Hi Word aus einem 64 Bit Typen extrahieren
-static __device__ uint32_t HIWORD(const uint64_t &x) {
-#if __CUDA_ARCH__ >= 130
-	return (uint32_t)__double2hiint(__longlong_as_double(x));
-#else
-	return (uint32_t)(x >> 32);
-#endif
-}
-
-// das Lo Word aus einem 64 Bit Typen extrahieren
-static __device__ uint32_t LOWORD(const uint64_t &x) {
-#if __CUDA_ARCH__ >= 130
-	return (uint32_t)__double2loint(__longlong_as_double(x));
-#else
-	return (uint32_t)(x & 0xFFFFFFFFULL);
-#endif
-}
-
-#define SPH_C64(x)    ((uint64_t)(x ## ULL))
-#define SPH_C32(x)    ((uint32_t)(x ## U))
+#include "cuda_helper.h"
 
 // aus heavy.cu
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
@@ -61,7 +33,7 @@ __device__ __forceinline__ void cuda_echo_round(
 	uint32_t &k0, uint32_t &k1, uint32_t &k2, uint32_t &k3,
 	uint32_t *W, int round)
 {
-	// W hat 16*4 als Abmaﬂe
+	// W hat 16*4 als Abma√üe
 
 	// Big Sub Words
 #pragma unroll 16
@@ -104,10 +76,10 @@ __device__ __forceinline__ void cuda_echo_round(
 
 	// Mix Columns
 #pragma unroll 4
-	for(int i=0;i<4;i++) // Schleife ¸ber je 2*uint32_t
+	for(int i=0;i<4;i++) // Schleife √ºber je 2*uint32_t
 	{
 #pragma unroll 4
-		for(int j=0;j<4;j++) // Schleife ¸ber die elemnte
+		for(int j=0;j<4;j++) // Schleife √ºber die elemnte
 		{
 			int idx = j<<2; // j*4
 
@@ -166,7 +138,7 @@ __global__ void x11_echo512_gpu_hash_64(int threads, uint32_t startNounce, uint6
 			W[i + 3] = 0;
 		}
 
-		// kopiere 32-byte groﬂen hash
+		// kopiere 32-byte gro√üen hash
 #pragma unroll 16
 		for(int i=0;i<16;i++)
 			W[i+32] = Hash[i];
@@ -226,7 +198,7 @@ __host__ void x11_echo512_cpu_hash_64(int thr_id, int threads, uint32_t startNou
     dim3 grid((threads + threadsperblock-1)/threadsperblock);
     dim3 block(threadsperblock);
 
-    // Grˆﬂe des dynamischen Shared Memory Bereichs
+    // Gr√∂√üe des dynamischen Shared Memory Bereichs
     size_t shared_size = 0;
 
 //    fprintf(stderr, "threads=%d, %d blocks, %d threads per block, %d bytes shared\n", threads, grid.x, block.x, shared_size);

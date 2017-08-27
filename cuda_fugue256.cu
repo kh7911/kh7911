@@ -1,11 +1,10 @@
-#include <cuda.h>
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-
 #include <stdio.h>
 #include <memory.h>
 
 #include "sph/sph_fugue.h"
+
+#include "cuda_helper.h"
+#include <host_defines.h>
 
 #define USE_SHARED 1
 
@@ -14,14 +13,6 @@ extern int device_map[8];
 
 // aus heavy.cu
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
-
-// Folgende Definitionen später durch header ersetzen
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-
-// schon in sph_fugue.h definiert
-//#define SPH_C32(x)	((uint32_t)(x ## U))
 
 uint32_t *d_fugue256_hashoutput[8];
 uint32_t *d_resultNonce[8];
@@ -743,7 +734,7 @@ void fugue256_cpu_init(int thr_id, int threads)
 	texDef(mixTab2Tex, mixTab2m, mixtab2_cpu, sizeof(uint32_t)*256);
 	texDef(mixTab3Tex, mixTab3m, mixtab3_cpu, sizeof(uint32_t)*256);
 
-	// Speicher für alle Ergebnisse belegen
+	// Speicher fÃ¼r alle Ergebnisse belegen
 	cudaMalloc(&d_fugue256_hashoutput[thr_id], 8 * sizeof(uint32_t) * threads);
 	cudaMalloc(&d_resultNonce[thr_id], sizeof(uint32_t)); 
 }
@@ -769,15 +760,15 @@ __host__ void fugue256_cpu_setBlock(int thr_id, void *data, void *pTargetIn)
 __host__ void fugue256_cpu_hash(int thr_id, int threads, int startNounce, void *outputHashes, uint32_t *nounce)
 {
 #if USE_SHARED
-	const int threadsperblock = 256; // Alignment mit mixtab Grösse. NICHT ÄNDERN
+	const int threadsperblock = 256; // Alignment mit mixtab GrÃ¶sse. NICHT Ã„NDERN
 #else
-	const int threadsperblock = 512; // so einstellen wie gewünscht ;-)
+	const int threadsperblock = 512; // so einstellen wie gewÃ¼nscht ;-)
 #endif
 	// berechne wie viele Thread Blocks wir brauchen
 	dim3 grid((threads + threadsperblock-1)/threadsperblock);
 	dim3 block(threadsperblock);
 
-	// Größe des dynamischen Shared Memory Bereichs
+	// GrÃ¶ÃŸe des dynamischen Shared Memory Bereichs
 #if USE_SHARED
 	size_t shared_size = 4 * 256 * sizeof(uint32_t);
 #else

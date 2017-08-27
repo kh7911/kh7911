@@ -1,24 +1,25 @@
 
-ccMiner release 1.2 (June 15th 2014) - "Killer Groestl + X13"
--------------------------------------------------------------
+ccMiner release 1.4.5-tpruvot (Oct 20th 2014) - "Keccak 256"
+---------------------------------------------------------------
 
 ***************************************************************
 If you find this tool useful and like to support its continued 
           development, then consider a donation.
 
-   LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm
-   BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
-   YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4
-   VTC donation address: VrjeFzMgvteCGarLw85KivBzmsiH9fqp4a
-   MAX donation address: mHrhQP9EFArechWxTFJ97s9D3jvcCvEEnt
-  DOGE donation address: DT9ghsGmez6ojVdEZgvaZbT2Z3TruXG6yP
-   HVC donation address: HNN3PyyTMkDo4RkEjkWSGMwqia1yD8mwJN
-   GRS donation address: FmJKJAhvyHWPeEVeLQHefr2naqgWc9ABTM
-   MYR donation address: MNHM7Q7HVfGpKDJgVJrY8ofwvmeugNewyf
-   JPC donation address: JYFBypVDkk583yKWY4M46TG5vXG8hfgD2U
-   SFR donation address: SR4b87aEnPfTs77bo9NnnaV21fiF6jQpAp
-   MNC donation address: MShgNUSYwybEbXLvJUtdNg1a7rUeiNgooK
-   BTQ donation address: 13GFwLiZL2DaA9XeE733PNrQX5QYLFsonS
+tpruvot@github:
+  BTC donation address: 1AJdfCpLWPNoAMDfHF1wD5y8VgKSSTHxPo
+  DRK  : XeVrkPrWB7pDbdFLfKhF1Z3xpqhsx6wkH3
+  NEOS : NaEcVrdzoCWHUYXb7X8QoafoKS9UV69Yk4
+  XST  : S9TqZucWgT6ajZLDBxQnHUtmkotCEHn9z9
+
+DJM34:
+  XCN donation address: CNh6F4h1byX7vvbmfQn4LMtsC4TYb8mgmn
+  BTC donation address: 1NENYmxwZGHsKFmyjTc5WferTn5VTFb7Ze
+
+cbuchner v1.2:
+  LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm
+  BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
+
 ***************************************************************
 
 >>> Introduction <<<
@@ -32,6 +33,11 @@ JackpotCoin
 QuarkCoin family & AnimeCoin
 TalkCoin
 DarkCoin and other X11 coins
+NEOS blake (256 14-rounds)
+BlakeCoin (256 8-rounds)
+Keccak (Maxcoin)
+Deep, Doom and Qubit
+Pentablake (Blake 512 x5)
 
 where some of these coins have a VERY NOTABLE nVidia advantage
 over competing AMD (OpenCL) implementations.
@@ -50,16 +56,29 @@ This code is based on the pooler cpuminer 2.3.2 release and inherits
 its command line interface and options.
 
   -a, --algo=ALGO       specify the algorithm to use
-                          heavy       use to mine Heavycoin
                           mjollnir    use to mine Mjollnircoin
+                          deep        use to mine Deepcoin
                           fugue256    use to mine Fuguecoin
                           groestl     use to mine Groestlcoin
-                          myr-gr      use to mine Myriad-Groestl
+                          dmd-gr      use to mine Diamond-Groestl
+                          myr-gr      use to mine Myriad-Groest
+                          heavy       use to mine Heavycoin
                           jackpot     use to mine Jackpotcoin
+                          keccak      use to mine Maxcoin
+                          luffa       use to mine Doomcoin
                           quark       use to mine Quarkcoin
+                          qubit       use to mine Qubit Algo
                           anime       use to mine Animecoin
+                          blake       use to mine NEOS (Blake 256)
+                          blakecoin   use to mine Old Blake 256
                           nist5       use to mine TalkCoin
+                          penta       use to mine Joincoin / Pentablake
+                          fresh       use to mine Freshcoin
+                          whirl       use to mine Whirlcoin
                           x11         use to mine DarkCoin
+                          x14         use to mine X14Coin
+                          x15         use to mine Halcyon
+                          x17         use to mine X17
 
   -d, --devices         gives a comma separated list of CUDA device IDs
                         to operate on. Device IDs start counting from 0!
@@ -86,9 +105,10 @@ its command line interface and options.
   -q, --quiet           disable per-thread hashmeter output
   -D, --debug           enable debug output
   -P, --protocol-dump   verbose dump of protocol-level activities
-  -B, --background      run the miner in the background
       --benchmark       run in offline benchmark mode
+      --cputest         debug hashes from cpu algorithms
   -c, --config=FILE     load a JSON-format configuration file
+  -K, --no-color        disable colored console output
   -V, --version         display version information and exit
   -h, --help            display this help text and exit
 
@@ -138,6 +158,31 @@ so we can more efficiently implement new algorithms using the latest hardware
 features.
 
 >>> RELEASE HISTORY <<<
+
+  Oct. 20th 2014  v1.4.5
+                  Add keccak algo from djm34 repo (maxcoin)
+                  Curl 7.35 and OpenSSL are now included in the binary (and win tree)
+                  Enhance windows terminal support (--help was broken)
+
+  Sep. 27th 2014  v1.4.4
+                  First SM 5.2 Release (GTX 970 & 980)
+                  CUDA Runtime included in binary
+                  Colors enabled by default
+
+  Sep. 10th 2014  v1.4.3
+                  Add algos from djm34 repo (deep, doom, qubit)
+                  Goalcoin seems to be dead, not imported.
+                  Create also the pentablake algo (5x Blake 512)
+
+  Sept  6th 2014  Almost twice the speed on blake256 algos with the "midstate" cache
+
+  Sep.  1st 2014  add X17, optimized x15 and whirl
+                  add blake (256 variant)
+                  color support on Windows,
+                  remove some dll dependencies (pthreads, msvcp)
+
+  Aug. 18th 2014  add X14, X15, Whirl, and Fresh algos,
+                  also add colors and nvprof cmd line support
 
   June 15th 2014  add X13 and Diamond Groestl support.
                   Thanks to tsiv and to Bombadil for the contributions!
@@ -204,6 +249,9 @@ features.
 Notable contributors to this application are:
 
 Christian Buchner, Christian H. (Germany): CUDA implementation 
+
+Tanguy Pruvot : CUDA, blake, general code cleanup, tuneup for linux (Makefiles)
+                and some vstudio 2013 stuff...
 
 and also many thanks to anyone else who contributed to the original
 cpuminer application (Jeff Garzik, pooler), it's original HVC-fork

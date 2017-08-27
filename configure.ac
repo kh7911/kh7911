@@ -1,9 +1,9 @@
-AC_INIT([ccminer], [2014.06.15])
+AC_INIT([ccminer], [1.4.6])
 
 AC_PREREQ([2.59c])
 AC_CANONICAL_SYSTEM
 AC_CONFIG_SRCDIR([cpu-miner.c])
-AM_INIT_AUTOMAKE([gnu])
+AM_INIT_AUTOMAKE([foreign subdir-objects])
 AC_CONFIG_HEADERS([cpuminer-config.h])
 
 dnl Make sure anyone changing configure.ac/Makefile.am has a clue
@@ -144,12 +144,12 @@ AC_ARG_WITH([cuda],
 
 if test -n "$with_cuda"
 then
-   CUDA_CFLAGS="-I$with_cuda/include"
+   CUDA_CFLAGS="-I$with_cuda/include $CUDA_CFLAGS"
    CUDA_LIBS="-lcudart"
    CUDA_LDFLAGS="-L$with_cuda/lib$SUFFIX"
    NVCC="$with_cuda/bin/nvcc"
 else
-   CUDA_CFLAGS="-I/usr/local/cuda/include"
+   CUDA_CFLAGS="-I/usr/local/cuda/include $CUDA_CFLAGS"
    CUDA_LIBS="-lcudart -static-libstdc++"
    CUDA_LDFLAGS="-L/usr/local/cuda/lib$SUFFIX"
    NVCC="nvcc"

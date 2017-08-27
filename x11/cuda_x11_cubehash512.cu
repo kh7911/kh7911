@@ -1,32 +1,26 @@
+#include "cuda_helper.h"
+
 // aus heavy.cu
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
 
 typedef unsigned char BitSequence;
-typedef unsigned long long DataLength;
-
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-
-static __device__ uint32_t cuda_swab32(uint32_t x)
-{
-	return __byte_perm(x, 0, 0x0123);
-}
-
-typedef unsigned char BitSequence;
-typedef unsigned long long DataLength;
 
 #define CUBEHASH_ROUNDS 16 /* this is r for CubeHashr/b */
 #define CUBEHASH_BLOCKBYTES 32 /* this is b for CubeHashr/b */
 
-typedef unsigned int uint32_t; /* must be exactly 32 bits */
+#if __CUDA_ARCH__ < 350
+#define LROT(x,bits) ((x << bits) | (x >> (32 - bits)))
+#else
+#define LROT(x, bits) __funnelshift_l(x, x, bits)
+#endif
 
-#define ROTATEUPWARDS7(a) (((a) << 7) | ((a) >> 25))
-#define ROTATEUPWARDS11(a) (((a) << 11) | ((a) >> 21))
+#define ROTATEUPWARDS7(a)  LROT(a,7)
+#define ROTATEUPWARDS11(a) LROT(a,11)
+
 #define SWAP(a,b) { uint32_t u = a; a = b; b = u; }
 
-__constant__ uint32_t c_IV_512[32];
-static const uint32_t h_IV_512[32] = {
+__device__ __constant__
+static const uint32_t c_IV_512[32] = {
 	0x2AEA2A61, 0x50F494D4, 0x2D538B8B,
 	0x4167D83E, 0x3FEE2313, 0xC701CF8C,
 	0xCC39968E, 0x50AC5695, 0x4D42C787,
@@ -217,7 +211,7 @@ void __device__ Init(uint32_t x[2][2][2][2][2])
     /* "the state is then transformed invertibly through 10r identical rounds */
     for (i = 0;i < 10;++i) rrounds(x);
 #else
-    uint32_t *iv = c_IV_512;
+    const uint32_t *iv = c_IV_512;
 
 #pragma unroll 2
     for (i = 0;i < 2;++i)
@@ -272,10 +266,10 @@ __global__ void x11_cubehash512_gpu_hash_64(int threads, uint32_t startNounce, u
         uint32_t x[2][2][2][2][2];
         Init(x);
 
-        // erste Hälfte des Hashes (32 bytes)
+        // erste HÃ¤lfte des Hashes (32 bytes)
         Update32(x, (const BitSequence*)Hash);
 
-        // zweite Hälfte des Hashes (32 bytes)
+        // zweite HÃ¤lfte des Hashes (32 bytes)
         Update32(x, (const BitSequence*)(Hash+8));
 
         // Padding Block
@@ -291,12 +285,13 @@ __global__ void x11_cubehash512_gpu_hash_64(int threads, uint32_t startNounce, u
 
 
 // Setup-Funktionen
-__host__ void x11_cubehash512_cpu_init(int thr_id, int threads)
+__host__
+void x11_cubehash512_cpu_init(int thr_id, int threads)
 {
-    cudaMemcpyToSymbol( c_IV_512, h_IV_512, sizeof(h_IV_512), 0, cudaMemcpyHostToDevice);
 }
 
-__host__ void x11_cubehash512_cpu_hash_64(int thr_id, int threads, uint32_t startNounce, uint32_t *d_nonceVector, uint32_t *d_hash, int order)
+__host__
+void x11_cubehash512_cpu_hash_64(int thr_id, int threads, uint32_t startNounce, uint32_t *d_nonceVector, uint32_t *d_hash, int order)
 {
     const int threadsperblock = 256;
 
@@ -304,7 +299,7 @@ __host__ void x11_cubehash512_cpu_hash_64(int thr_id, int threads, uint32_t star
     dim3 grid((threads + threadsperblock-1)/threadsperblock);
     dim3 block(threadsperblock);
 
-    // Größe des dynamischen Shared Memory Bereichs
+    // GrÃ¶ÃŸe des dynamischen Shared Memory Bereichs
     size_t shared_size = 0;
 
     x11_cubehash512_gpu_hash_64<<<grid, block, shared_size>>>(threads, startNounce, (uint64_t*)d_hash, d_nonceVector);

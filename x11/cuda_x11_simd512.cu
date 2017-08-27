@@ -1,34 +1,22 @@
 // Parallelisierung:
 //
-// FFT_8  wird 2 mal 8-fach parallel ausgeführt (in FFT_64)
+// FFT_8  wird 2 mal 8-fach parallel ausgefÃ¼hrt (in FFT_64)
 //        und 1 mal 16-fach parallel (in FFT_128_full)
 //
 // STEP8_IF und STEP8_MAJ beinhalten je zwei 8-fach parallele Operationen
 
 #define TPB 256
 
+#include "cuda_helper.h"
+
 // aus heavy.cu
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
-
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
 
 int *d_state[8];
 uint4 *d_temp4[8];
 
 // texture bound to d_temp4[thr_id], for read access in Compaction kernel
 texture<uint4, 1, cudaReadModeElementType> texRef1D_128;
-
-#define C32(x)    ((uint32_t)(x ## U))
-#define T32(x) ((x) & C32(0xFFFFFFFF))
-
-#if __CUDA_ARCH__ < 350 
-    // Kepler (Compute 3.0)
-    #define ROTL32(x, n) T32(((x) << (n)) | ((x) >> (32 - (n))))
-#else
-    // Kepler (Compute 3.5)
-    #define ROTL32(x, n) __funnelshift_l( (x), (x), (n) )
-#endif
 
 __constant__  uint32_t c_IV_512[32];
 const uint32_t h_IV_512[32] = {
@@ -585,7 +573,7 @@ x11_simd512_gpu_expand_64(int threads, uint32_t startNounce, uint64_t *g_hash, u
         for (int i=0; i<2; i++)
             Hash[i] = inpHash[8*i+(threadIdx.x&7)];
 
-        // Puffer für expandierte Nachricht
+        // Puffer fÃ¼r expandierte Nachricht
         uint4 *temp4 = &g_temp4[64 * hashPosition];
 
         Expansion(Hash, temp4);
@@ -642,35 +630,28 @@ __host__ void x11_simd512_cpu_init(int thr_id, int threads)
     cudaMalloc( &d_state[thr_id], 32*sizeof(int)*threads );
     cudaMalloc( &d_temp4[thr_id], 64*sizeof(uint4)*threads );
 
-#if 1
-    // Textur für 128 Bit Zugriffe
+    // Textur fÃ¼r 128 Bit Zugriffe
     cudaChannelFormatDesc channelDesc128 = cudaCreateChannelDesc<uint4>();
     texRef1D_128.normalized = 0;
     texRef1D_128.filterMode = cudaFilterModePoint;
     texRef1D_128.addressMode[0] = cudaAddressModeClamp;
     cudaBindTexture(NULL, &texRef1D_128, d_temp4[thr_id], &channelDesc128, 64*sizeof(uint4)*threads);
-#endif
 
-    cudaMemcpyToSymbol( c_IV_512, h_IV_512, sizeof(h_IV_512), 0, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol( c_FFT128_8_16_Twiddle, h_FFT128_8_16_Twiddle, sizeof(h_FFT128_8_16_Twiddle), 0, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol( c_FFT256_2_128_Twiddle, h_FFT256_2_128_Twiddle, sizeof(h_FFT256_2_128_Twiddle), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(c_IV_512, h_IV_512, sizeof(h_IV_512), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(c_FFT128_8_16_Twiddle, h_FFT128_8_16_Twiddle, sizeof(h_FFT128_8_16_Twiddle), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(c_FFT256_2_128_Twiddle, h_FFT256_2_128_Twiddle, sizeof(h_FFT256_2_128_Twiddle), 0, cudaMemcpyHostToDevice);
 
-
-	// CH
-	cudaMemcpyToSymbol( d_cw0, h_cw0, sizeof(h_cw0), 0, cudaMemcpyHostToDevice);
-	cudaMemcpyToSymbol( d_cw1, h_cw1, sizeof(h_cw1), 0, cudaMemcpyHostToDevice);	
-	cudaMemcpyToSymbol( d_cw2, h_cw2, sizeof(h_cw2), 0, cudaMemcpyHostToDevice);	
-	cudaMemcpyToSymbol( d_cw3, h_cw3, sizeof(h_cw3), 0, cudaMemcpyHostToDevice);
-
-//    cudaFuncSetCacheConfig(x11_simd512_gpu_compress1_64, cudaFuncCachePreferL1);
-//    cudaFuncSetCacheConfig(x11_simd512_gpu_compress2_64, cudaFuncCachePreferL1);
+    cudaMemcpyToSymbol(d_cw0, h_cw0, sizeof(h_cw0), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(d_cw1, h_cw1, sizeof(h_cw1), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(d_cw2, h_cw2, sizeof(h_cw2), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(d_cw3, h_cw3, sizeof(h_cw3), 0, cudaMemcpyHostToDevice);
 }
 
 __host__ void x11_simd512_cpu_hash_64(int thr_id, int threads, uint32_t startNounce, uint32_t *d_nonceVector, uint32_t *d_hash, int order)
 {
     const int threadsperblock = TPB;
 
-    // Größe des dynamischen Shared Memory Bereichs
+    // GrÃ¶ÃŸe des dynamischen Shared Memory Bereichs
     size_t shared_size = 0;
 
     // berechne wie viele Thread Blocks wir brauchen
@@ -681,7 +662,7 @@ __host__ void x11_simd512_cpu_hash_64(int thr_id, int threads, uint32_t startNou
 
     dim3 grid((threads + threadsperblock-1)/threadsperblock);
 
-    // künstlich die Occupancy limitieren, um das totale Erschöpfen des Texture Cache zu vermeiden
+    // kÃ¼nstlich die Occupancy limitieren, um das totale ErschÃ¶pfen des Texture Cache zu vermeiden
     x11_simd512_gpu_compress1_64<<<grid, block, shared_size>>>(threads, startNounce, (uint64_t*)d_hash, d_nonceVector, d_temp4[thr_id], d_state[thr_id]);
     x11_simd512_gpu_compress2_64<<<grid, block, shared_size>>>(threads, startNounce, (uint64_t*)d_hash, d_nonceVector, d_temp4[thr_id], d_state[thr_id]);
 
